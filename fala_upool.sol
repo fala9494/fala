@@ -155,7 +155,7 @@ interface IERC721 {
 }
 
 contract FalaUPool is Ownable {
-    address public usdtTokenAddr = address(0x0D6Cd65015cabA96590B74aE4371e170A27B3a29); //usdt
+    address public usdtTokenAddr = address(0x55d398326f99059fF775485246999027B3197955); //usdt 0x0D6Cd65015cabA96590B74aE4371e170A27B3a29
     address public falaTokenAddr = address(0x6b6da2C8CCb7043851cfa3D93D42EE67E8aCE867); // token地址
     address public falaNFTAddr = address(0x785fdb070B528D78f214d77CedE7ee3Bc9e5BF66); // NFT合约地址
 
@@ -238,8 +238,8 @@ contract FalaUPool is Ownable {
     }
 
     function setParams(address usdtTokenAddr_, address falaTokenAddr_, address projectAddr_, address receiveUSDTAddr_, uint256 secondsPerMin_, uint256 luckyPer_) public onlyOwner {
-        usdtTokenAddr = usdtTokenAddr_;
-        falaTokenAddr = falaTokenAddr_;
+        //usdtTokenAddr = usdtTokenAddr_;
+        //falaTokenAddr = falaTokenAddr_;
         projectAddr = projectAddr_;
         receiveUSDTAddr = receiveUSDTAddr_;
         secondsPerMin = secondsPerMin_;
