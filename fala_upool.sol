@@ -237,9 +237,7 @@ contract FalaUPool is Ownable {
         return roundBuyUsers[round_].length;
     }
 
-    function setParams(address usdtTokenAddr_, address falaTokenAddr_, address projectAddr_, address receiveUSDTAddr_, uint256 secondsPerMin_, uint256 luckyPer_) public onlyOwner {
-        //usdtTokenAddr = usdtTokenAddr_;
-        //falaTokenAddr = falaTokenAddr_;
+    function setParams(address projectAddr_, address receiveUSDTAddr_, uint256 secondsPerMin_, uint256 luckyPer_) public onlyOwner {
         projectAddr = projectAddr_;
         receiveUSDTAddr = receiveUSDTAddr_;
         secondsPerMin = secondsPerMin_;
