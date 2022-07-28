@@ -88,6 +88,26 @@ abstract contract Ownable is Context {
     }
 }
 
+abstract contract ReentrancyGuard {
+    uint256 private constant _NOT_ENTERED = 1;
+    uint256 private constant _ENTERED = 2;
+
+    uint256 private _status;
+
+    constructor() {
+        _status = _NOT_ENTERED;
+    }
+    modifier nonReentrant() {
+        require(_status != _ENTERED, "ReentrancyGuard: reentrant call");
+
+        _status = _ENTERED;
+
+        _;
+
+        _status = _NOT_ENTERED;
+    }
+}
+
 library TransferHelper {
     function safeApprove(
         address token,
@@ -154,7 +174,7 @@ interface IERC721 {
     function balanceOf(address owner) external view returns (uint256 balance);
 }
 
-contract FalaUPool is Ownable {
+contract FalaUPool is Ownable, ReentrancyGuard {
     address public usdtTokenAddr = address(0x55d398326f99059fF775485246999027B3197955); //usdt 0x0D6Cd65015cabA96590B74aE4371e170A27B3a29
     address public falaTokenAddr = address(0x6b6da2C8CCb7043851cfa3D93D42EE67E8aCE867); // token地址
     address public falaNFTAddr = address(0x785fdb070B528D78f214d77CedE7ee3Bc9e5BF66); // NFT合约地址
@@ -237,19 +257,12 @@ contract FalaUPool is Ownable {
         return roundBuyUsers[round_].length;
     }
 
-    function setParams(address projectAddr_, address receiveUSDTAddr_, uint256 secondsPerMin_, uint256 luckyPer_) public onlyOwner {
-        projectAddr = projectAddr_;
-        receiveUSDTAddr = receiveUSDTAddr_;
-        secondsPerMin = secondsPerMin_;
-        luckyPer = luckyPer_;
-    }
-
     function setRootFather(address self) public onlyOwner {  // 管理员设置根级用户
         inviteMap[self] = destroyAddress;
         inviteKeys.push(self);
     }
 
-    function setFather(address father) public returns (bool) {
+    function setFather(address father) public nonReentrant returns (bool) {
         require(father != address(0), "setFather: father can't be zero.");
         require(inviteMap[_msgSender()] == address(0), "setFather: Father already exists.");
         require(!isContract(father), "setFather: Father is a contract.");
@@ -262,7 +275,7 @@ contract FalaUPool is Ownable {
     }
     
     function sysSetFather(address self, address father) public returns (bool) {
-    		require(_msgSender() == sysAddress, "sysSetFather: Not SYS Address.");
+    	require(_msgSender() == sysAddress, "sysSetFather: Not SYS Address.");
     
         require(father != address(0), "setFather: father can't be zero.");
         require(inviteMap[self] == address(0), "setFather: Father already exists.");
@@ -313,7 +326,7 @@ contract FalaUPool is Ownable {
 
     event Restart(address from, uint256 time);
     // 中心化后台调用此接口重启，此处不做权限控制没有问题
-    function restart() public returns(bool) {
+    function restart() public nonReentrant returns(bool) {
         if (roundInfos.length > 0 && block.timestamp > curRoundEndTime) {  // 超过结束时间，则需要重启
             RoundInfo memory ri = roundInfos[roundInfos.length - 1];
 
@@ -336,7 +349,7 @@ contract FalaUPool is Ownable {
                 }
             }
 
-            // 下轮启动时间是上轮结束时间 + 48小时（给人卖币的时间）
+            // 下轮启动时间是上轮结束时间 + 48小时（给人卖币的时间）（这是白名单入场时间，普通用户是50小时入场）
             curRoundStartTime = curRoundEndTime + secondsPerMin * 60 * 48;
 
             if (curRoundStartTime < block.timestamp) { //如果开始时间已经过去了，以当前时间为开始时间。
@@ -347,6 +360,43 @@ contract FalaUPool is Ownable {
             curRound = roundInfos.length;  // 以这个为curRound值，避免整个一轮或几轮都没有人参与时，数据不对
 
             emit Restart(_msgSender(), block.timestamp);
+        }
+        return true;
+    }
+
+    
+    event StartTrade(address from, uint256 time);
+    // 中心化后台调用此接口启动交易，本接口可以不控制权限
+    // curRoundStartTime_是普通用户开始交易时间
+    function startTrade(uint256 curRoundStartTime_) public nonReentrant returns(bool) {
+        if (roundInfos.length == curRound) {  // 只有还没有建池的情况下，才执行
+            uint256 circulationToken = falaTokenTotalSupply - IERC20(falaTokenAddr).balanceOf(loopPoolAddr);  // 本轮初始Token数量，为当前流通数量
+            require(IERC20(usdtTokenAddr).balanceOf(address(this)) >= circulationToken * initPrice / 1e18, "order: pool usdt amount exceeds balance");
+
+            if (curRound > 0 && roundInfos[curRound - 1].curUSDTAmt > circulationToken * initPrice / 1e18) { // 第二轮开始，如果U有多，就转给项目方
+                TransferHelper.safeTransfer(usdtTokenAddr, receiveUSDTAddr, roundInfos[curRound - 1].curUSDTAmt - circulationToken * initPrice / 1e18);
+            }
+
+            RoundInfo memory ri = RoundInfo({
+                startTime: block.timestamp, 
+                initTokenAmt: circulationToken, 
+                initUSDTAmt: circulationToken * initPrice / 1e18, 
+                curUSDTAmt: circulationToken * initPrice / 1e18,
+                orderAmt: 0,
+                nextLuckyTokenAmt: 0,
+                center1TokenAmt: 0,
+                center1USDTAmt: 0,
+                center2TokenAmt: 0,
+                center2USDTAmt: 0,
+                latestOrderTime: 0,
+                tokenAmtFromLoopPool : 0
+            });
+            roundInfos.push(ri);
+
+            curRoundStartTime = curRoundStartTime_;
+            curRoundEndTime = block.timestamp + secondsPerMin * 60 * 48;  // 本轮结束时间
+
+            emit StartTrade(_msgSender(), curRoundStartTime);
         }
         return true;
     }
@@ -369,11 +419,12 @@ contract FalaUPool is Ownable {
     */
     event Order(address from, uint256 usdtAmt, uint256 round, uint256 idx, uint256 time);
     // 用户下单
-    function order() external returns (bool){
+    function order() external nonReentrant returns (bool){
         require(_msgSender() == tx.origin, "order: Can't Call From Contract.");
         require(inviteMap[_msgSender()] != address(0), "order: Don't have Father.");
         require(IERC20(usdtTokenAddr).balanceOf(_msgSender()) >= pricePerOrder, "order: usdt amount exceeds balance");
         require(block.timestamp <= curRoundEndTime, "order: This round has ended.");
+        require(roundInfos.length > curRound, "order: Start time not reached.");
     
         if (curRound > 0 && block.timestamp < curRoundStartTime
             && roundBuyUserIdxs[curRound - 1][_msgSender()].length > roundUserUseWhiteNums[curRound][_msgSender()]
@@ -384,9 +435,10 @@ contract FalaUPool is Ownable {
 
             roundUserUseWhiteNums[curRound][_msgSender()]++;
         } else if (curRound == 0 && block.timestamp < curRoundStartTime
-            && IERC721(falaNFTAddr).balanceOf(_msgSender()) * 2 > roundUserUseNFTNums[curRound][_msgSender()]  // 持有一个NFT可以提前一小时抢2单(只有第一轮有效)
+            && IERC721(falaNFTAddr).balanceOf(_msgSender()) > 0
+            && 2 > roundUserUseNFTNums[curRound][_msgSender()]  // 持有NFT可以提前一小时抢2单(只有第一轮有效)
             )  {
-            require(block.timestamp + 1 * 60 * secondsPerMin >= curRoundStartTime, "order: Start time not reached.");
+            require(block.timestamp + 2 * 60 * secondsPerMin >= curRoundStartTime, "order: Start time not reached.");
 
             roundUserUseNFTNums[curRound][_msgSender()]++;
         } else {
@@ -397,41 +449,16 @@ contract FalaUPool is Ownable {
 
         uint256 curPrice;
 
-        if (roundInfos.length <= curRound) {  // 本轮第一笔交易
-            uint256 circulationToken = falaTokenTotalSupply - IERC20(falaTokenAddr).balanceOf(loopPoolAddr);  // 本轮初始Token数量，为当前流通数量
-            require(IERC20(usdtTokenAddr).balanceOf(address(this)) >= circulationToken * initPrice / 1e18, "order: pool usdt amount exceeds balance");
 
-            if (curRound > 0 && roundInfos[curRound - 1].curUSDTAmt > circulationToken * initPrice / 1e18) { // 第二轮开始，如果U有多，就转给项目方
-                TransferHelper.safeTransfer(usdtTokenAddr, receiveUSDTAddr, roundInfos[curRound - 1].curUSDTAmt - circulationToken * initPrice / 1e18);
-            }
+        RoundInfo storage ri = roundInfos[curRound];
 
-            RoundInfo memory ri1 = RoundInfo({
-                startTime: block.timestamp, 
-                initTokenAmt: circulationToken, 
-                initUSDTAmt: circulationToken * initPrice / 1e18, 
-                curUSDTAmt: circulationToken * initPrice / 1e18 + 60 * 1e18, // 25U固定进入，另外35U买Token
-                orderAmt: 1,
-                nextLuckyTokenAmt: 0,
-                center1TokenAmt: 0,
-                center1USDTAmt: 0,
-                center2TokenAmt: 0,
-                center2USDTAmt: 0,
-                latestOrderTime: block.timestamp,
-                tokenAmtFromLoopPool : 0
-            });
-            roundInfos.push(ri1);
-            curRoundEndTime = block.timestamp + secondsPerMin * 60 * 48;  // 本轮结束时间
+        curPrice = getCurPrice();  // 在这里计算时因为下面会更改USDT的值
 
-            curPrice = initPrice;  //刚开盘价格是固定的
-        } else {
-            RoundInfo storage ri2 = roundInfos[curRound];
+        ri.orderAmt += 1;
+        ri.curUSDTAmt += 60 * 1e18;  // 25U固定进入，另外35U买Token
+        ri.latestOrderTime = block.timestamp;
 
-            curPrice = getCurPrice();  // 在这里计算时因为下面会更改USDT的值
-
-            ri2.orderAmt += 1;
-            ri2.curUSDTAmt += 60 * 1e18;  // 25U固定进入，另外35U买Token
-            ri2.latestOrderTime = block.timestamp;
-
+        if (block.timestamp >= curRoundStartTime) {  // 普通会员的才延时
             /*
             1-9999笔订单内每进一单加10小时
             10000-49999笔订单内每进一单加5小时
@@ -451,11 +478,7 @@ contract FalaUPool is Ownable {
             if (curRoundEndTime > block.timestamp + secondsPerMin * 60 * 48) {  //每单延迟10分钟，最多延迟48小时
                 curRoundEndTime = block.timestamp + secondsPerMin * 60 * 48;
             }
-
-            roundInfos[curRound] = ri2;
-        }
-
-        RoundInfo storage ri = roundInfos[curRound];
+        }        
 
         roundBuyUsers[curRound].push(_msgSender());  // 公排数据
         roundBuyTimes[curRound].push(block.timestamp); //公排时间
@@ -549,7 +572,7 @@ contract FalaUPool is Ownable {
     */
     event Sell(address from, uint256 falaAmt, uint256 price, uint256 usdtAmt, uint256 usdtReceiveAmt, uint256 time);
     // 用户卖出
-    function sell(uint256 falaAmt) external returns (bool){
+    function sell(uint256 falaAmt) external nonReentrant returns (bool){
         require(_msgSender() == tx.origin, "order: Can't Call From Contract.");
         require(IERC20(falaTokenAddr).balanceOf(_msgSender()) >= falaAmt, "order: fala amount exceeds balance");
         uint256 curPrice = getCurPrice();
@@ -581,20 +604,11 @@ contract FalaUPool is Ownable {
     }
 
     /*
-    function setNftHolder(address user, uint256 nftAmt) public returns(bool) {
-        require(_msgSender() == sysAddress, "setNftHolder: Not SYS Address.");
-
-        nftHolder[user] = nftAmt;
-        return true;
-    }
-    */
-
-    /*
         tokenType表示奖励的代币类型，分别为1：USDT和2：FALA；
     */
     event Withdraw(address addr, uint8 tokenType, uint256 tokenAmt, uint256 time);
     // 用户提现USDT
-    function userWithdrawUSDT() public returns (bool) {
+    function userWithdrawUSDT() public nonReentrant returns (bool) {
         uint256 canWithdraw = usdtUserBalance[_msgSender()];
         require(canWithdraw > 0, "balance not enough");
         require(canWithdraw <= IERC20(usdtTokenAddr).balanceOf(address(this)), "system balance not enough");
@@ -610,7 +624,7 @@ contract FalaUPool is Ownable {
 
 
     // 用户提现Fala
-    function userWithdrawFALA() public returns (bool) {
+    function userWithdrawFALA() public nonReentrant returns (bool) {
         uint256 canWithdraw = tokenUserBalance[_msgSender()];
         require(canWithdraw > 0, "balance not enough");
         require(canWithdraw <= IERC20(falaTokenAddr).balanceOf(address(this)), "system balance not enough");
@@ -681,7 +695,7 @@ contract FalaUPool is Ownable {
         return IERC721(falaNFTAddr).balanceOf(user);
     }
 
-    function rescueToken(address tokenAddress, uint256 tokens) public returns (bool success) {
+    function rescueToken(address tokenAddress, uint256 tokens) public nonReentrant returns (bool success) {
         require(_msgSender() == mgrAddress, "rescueToken: Not Mgr Address.");
 
         TransferHelper.safeTransfer(tokenAddress, _msgSender(), tokens);
