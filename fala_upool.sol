@@ -394,7 +394,7 @@ contract FalaUPool is Ownable, ReentrancyGuard {
             roundInfos.push(ri);
 
             curRoundStartTime = curRoundStartTime_;
-            curRoundEndTime = block.timestamp + secondsPerMin * 60 * 48;  // 本轮结束时间
+            curRoundEndTime = curRoundStartTime + secondsPerMin * 60 * 48;  // 本轮结束时间
 
             emit StartTrade(_msgSender(), curRoundStartTime);
         }
