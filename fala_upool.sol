@@ -531,27 +531,34 @@ contract FalaUPool is Ownable, ReentrancyGuard {
             TransferHelper.safeTransfer(usdtTokenAddr, projectAddr, 10 * 1e18);
             TransferHelper.safeTransfer(falaTokenAddr, projectAddr, tokenAmt * 1000 / 3500);
         } else {
-            if (inviteOrderNums[curRound][parent] >= 5) {
-                usdtUserBalance[parent] += 10 * 1e18;     
-                emit Rewards(parent, 1, 10 * 1e18, 4, block.timestamp, 0, curRound, _msgSender());       
-                tokenUserBalance[parent] += tokenAmt * 1000 / 3500;
-                emit Rewards(parent, 2, tokenAmt * 1000 / 3500, 4, block.timestamp, 0, curRound, _msgSender());
-            }else if (inviteOrderNums[curRound][parent] >= 3) {
-                usdtUserBalance[parent] += 75 * 1e17;
-                emit Rewards(parent, 1, 75 * 1e17, 4, block.timestamp, 0, curRound, _msgSender());
-                tokenUserBalance[parent] += tokenAmt * 750 / 3500;
-                emit Rewards(parent, 2, tokenAmt * 750 / 3500, 4, block.timestamp, 0, curRound, _msgSender());
+           if (roundBuyUserIdxs[curRound][parent].length > 0
+                || (curRound == 0 && IERC721(falaNFTAddr).balanceOf(parent) > 0) 
+            ) {
+                if (inviteOrderNums[curRound][parent] >= 5) {
+                    usdtUserBalance[parent] += 10 * 1e18;     
+                    emit Rewards(parent, 1, 10 * 1e18, 4, block.timestamp, 0, curRound, _msgSender());       
+                    tokenUserBalance[parent] += tokenAmt * 1000 / 3500;
+                    emit Rewards(parent, 2, tokenAmt * 1000 / 3500, 4, block.timestamp, 0, curRound, _msgSender());
+                }else if (inviteOrderNums[curRound][parent] >= 3) {
+                    usdtUserBalance[parent] += 75 * 1e17;
+                    emit Rewards(parent, 1, 75 * 1e17, 4, block.timestamp, 0, curRound, _msgSender());
+                    tokenUserBalance[parent] += tokenAmt * 750 / 3500;
+                    emit Rewards(parent, 2, tokenAmt * 750 / 3500, 4, block.timestamp, 0, curRound, _msgSender());
 
-                TransferHelper.safeTransfer(usdtTokenAddr, projectAddr, 25 * 1e17);
-                TransferHelper.safeTransfer(falaTokenAddr, projectAddr, tokenAmt * 250 / 3500);
-            } else { // 肯定有1单
-                usdtUserBalance[parent] += 5 * 1e18;      
-                emit Rewards(parent, 1, 5 * 1e18, 4, block.timestamp, 0, curRound, _msgSender());      
-                tokenUserBalance[parent] += tokenAmt * 500 / 3500;
-                emit Rewards(parent, 2, tokenAmt * 500 / 3500, 4, block.timestamp, 0, curRound, _msgSender());
+                    TransferHelper.safeTransfer(usdtTokenAddr, projectAddr, 25 * 1e17);
+                    TransferHelper.safeTransfer(falaTokenAddr, projectAddr, tokenAmt * 250 / 3500);
+                } else { // 肯定有1单
+                    usdtUserBalance[parent] += 5 * 1e18;      
+                    emit Rewards(parent, 1, 5 * 1e18, 4, block.timestamp, 0, curRound, _msgSender());      
+                    tokenUserBalance[parent] += tokenAmt * 500 / 3500;
+                    emit Rewards(parent, 2, tokenAmt * 500 / 3500, 4, block.timestamp, 0, curRound, _msgSender());
 
-                TransferHelper.safeTransfer(usdtTokenAddr, projectAddr, 5 * 1e18);
-                TransferHelper.safeTransfer(falaTokenAddr, projectAddr, tokenAmt * 500 / 3500);
+                    TransferHelper.safeTransfer(usdtTokenAddr, projectAddr, 5 * 1e18);
+                    TransferHelper.safeTransfer(falaTokenAddr, projectAddr, tokenAmt * 500 / 3500);
+                }
+            } else {
+                TransferHelper.safeTransfer(usdtTokenAddr, projectAddr, 10 * 1e18);
+                TransferHelper.safeTransfer(falaTokenAddr, projectAddr, tokenAmt * 1000 / 3500);
             }
             
         }
