@@ -223,6 +223,8 @@ contract FalaUPool is Ownable, ReentrancyGuard {
     address private sysAddress; // 系统操作地址
     address public projectAddr;  // 项目方地址，比如首单的公排，奖励给这个地址
     address public receiveUSDTAddr;  // 下轮第一单开始前，将多余的U转到该地址
+    address public receiveOrderBnbAddr;// 项目方接收买入BNB 0.001地址
+    address public receiveSellBnbAddr;// 项目方接收卖出BNB 0.001地址
     address public loopPoolAddr;  // 循环池地址
 
     mapping (address => uint256) public usdtUserBalance; // USDT的用户可提现余额
@@ -240,11 +242,13 @@ contract FalaUPool is Ownable, ReentrancyGuard {
     */
     event Rewards(address to, uint8 tokenType, uint256 tokenAmt, uint8 rewardType, uint256 time, uint256 finalIdx, uint256 round, address from);
 
-    constructor(address mgrAddress_, address sysAddress_, address projectAddr_, address receiveUSDTAddr_, uint256 firstStartTime_) {
+    constructor(address mgrAddress_, address sysAddress_, address projectAddr_, address receiveUSDTAddr_, address receiveOrderBnbAddr_, address receiveSellBnbAddr_, uint256 firstStartTime_) {
         mgrAddress = mgrAddress_;
         sysAddress = sysAddress_;
         projectAddr = projectAddr_;
         receiveUSDTAddr = receiveUSDTAddr_;
+        receiveOrderBnbAddr = receiveOrderBnbAddr_;
+        receiveSellBnbAddr = receiveSellBnbAddr_;
         curRoundStartTime = firstStartTime_;
         curRoundEndTime = curRoundStartTime + secondsPerMin * 60 * 48;
     }
@@ -332,7 +336,7 @@ contract FalaUPool is Ownable, ReentrancyGuard {
 
             // 终极奖  5%? 终极大奖(每一轮最后50单平均分)
             uint256 finalRewardAmt = ri.orderAmt * 5 * 1e18;   // 实际上，这里就是5% 正常写法： ri.orderAmt * 100 * 5 / 100
-            if (curRound < roundInfos.length) { // 这个判断是防止有一轮或几轮没人参与时，重复奖励了
+            if (curRound < roundInfos.length && ri.orderAmt > 0) { // 这个判断是防止有一轮或几轮没人参与时，重复奖励了
                 uint256 buyUsersLen = roundBuyUsers[roundInfos.length - 1].length;
                 uint256 rewardUserAmt = buyUsersLen < 50 ? buyUsersLen : 50;
                 uint256 rewardAmtPerUser = finalRewardAmt / rewardUserAmt;
@@ -419,9 +423,10 @@ contract FalaUPool is Ownable, ReentrancyGuard {
     */
     event Order(address from, uint256 usdtAmt, uint256 round, uint256 idx, uint256 time);
     // 用户下单
-    function order() external nonReentrant returns (bool){
+    function order() external payable nonReentrant returns (bool){
         require(_msgSender() == tx.origin, "order: Can't Call From Contract.");
         require(inviteMap[_msgSender()] != address(0), "order: Don't have Father.");
+        require(msg.value == 1e15, "BNB not enough");
         require(IERC20(usdtTokenAddr).balanceOf(_msgSender()) >= pricePerOrder, "order: usdt amount exceeds balance");
         require(block.timestamp <= curRoundEndTime, "order: This round has ended.");
         require(roundInfos.length > curRound, "order: Start time not reached.");
@@ -444,6 +449,8 @@ contract FalaUPool is Ownable, ReentrancyGuard {
         } else {
             require(block.timestamp >= curRoundStartTime, "order: Start time not reached.");
         }
+
+        payable(receiveOrderBnbAddr).transfer(msg.value);
 
         TransferHelper.safeTransferFrom(usdtTokenAddr, _msgSender(), address(this), pricePerOrder);
 
@@ -531,7 +538,7 @@ contract FalaUPool is Ownable, ReentrancyGuard {
             TransferHelper.safeTransfer(usdtTokenAddr, projectAddr, 10 * 1e18);
             TransferHelper.safeTransfer(falaTokenAddr, projectAddr, tokenAmt * 1000 / 3500);
         } else {
-           if (roundBuyUserIdxs[curRound][parent].length > 0
+            if (roundBuyUserIdxs[curRound][parent].length > 0
                 || (curRound == 0 && IERC721(falaNFTAddr).balanceOf(parent) > 0) 
             ) {
                 if (inviteOrderNums[curRound][parent] >= 5) {
@@ -560,7 +567,6 @@ contract FalaUPool is Ownable, ReentrancyGuard {
                 TransferHelper.safeTransfer(usdtTokenAddr, projectAddr, 10 * 1e18);
                 TransferHelper.safeTransfer(falaTokenAddr, projectAddr, tokenAmt * 1000 / 3500);
             }
-            
         }
 
         emit Order(_msgSender(), pricePerOrder, curRound, roundBuyUsers[curRound].length, block.timestamp);
@@ -579,13 +585,16 @@ contract FalaUPool is Ownable, ReentrancyGuard {
     */
     event Sell(address from, uint256 falaAmt, uint256 price, uint256 usdtAmt, uint256 usdtReceiveAmt, uint256 time);
     // 用户卖出
-    function sell(uint256 falaAmt) external nonReentrant returns (bool){
+    function sell(uint256 falaAmt) external payable nonReentrant returns (bool){
         require(_msgSender() == tx.origin, "order: Can't Call From Contract.");
+        require(msg.value == 1e15, "BNB not enough");
         require(IERC20(falaTokenAddr).balanceOf(_msgSender()) >= falaAmt, "order: fala amount exceeds balance");
         uint256 curPrice = getCurPrice();
         uint256 usdtAmt = curPrice * falaAmt / 1e18;
         require(usdtAmt <= IERC20(usdtTokenAddr).balanceOf(address(this)), "system balance not enough");
 
+        payable(receiveSellBnbAddr).transfer(msg.value);
+        
         TransferHelper.safeTransferFrom(falaTokenAddr, _msgSender(), loopPoolAddr, falaAmt);  //卖币是回到循环池
 
         RoundInfo storage ri = roundInfos[roundInfos.length - 1];
